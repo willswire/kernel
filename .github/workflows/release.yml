@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,59 +43,47 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install build dependencies
+        if: steps.release_check.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            flex \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            make \
+            xz-utils
+
       - name: Build kernel
         if: steps.release_check.outputs.skip != 'true'
         run: |
           set -euo pipefail
           KERNEL_DIR="containerization/kernel"
           KSOURCE=$(awk -F '\?=' '/^KSOURCE/ {print $2}' "${KERNEL_DIR}/Makefile" | xargs)
-          KIMAGE=$(awk -F '\?=' '/^KIMAGE/ {print $2}' "${KERNEL_DIR}/Makefile" | xargs)
 
           HOST_CPUS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc || echo 2)
           DEFAULT_CPUS=$(( HOST_CPUS < 8 ? HOST_CPUS : 8 ))
           KBUILD_CPUS="${KBUILD_CPUS:-${DEFAULT_CPUS}}"
 
-          HOST_MEM_KB=$(awk "/^MemTotal:/ {print \$2}" /proc/meminfo 2>/dev/null || echo 0)
-          HOST_MEM_GB=$(( HOST_MEM_KB / 1024 / 1024 ))
-          if [ "${HOST_MEM_GB}" -le 0 ]; then
-            HOST_MEM_GB=8
-          fi
-          DEFAULT_MEM_GB=$(( HOST_MEM_GB * 80 / 100 ))
-          if [ "${DEFAULT_MEM_GB}" -lt 2 ]; then
-            DEFAULT_MEM_GB=2
-          fi
-          if [ "${DEFAULT_MEM_GB}" -gt 16 ]; then
-            DEFAULT_MEM_GB=16
-          fi
-          KBUILD_MEMORY="${KBUILD_MEMORY:-${DEFAULT_MEM_GB}g}"
-
-          docker build "${KERNEL_DIR}/image" -f "${KERNEL_DIR}/image/Dockerfile" -t "${KIMAGE}"
-
-          cat > /tmp/kernel-build.Dockerfile <<'DOCKERFILE'
-          ARG BASE_IMAGE=kernel-build:0.1
-          FROM ${BASE_IMAGE}
-
-          RUN apt-get update \
-           && apt-get install -y libelf-dev \
-           && apt-get clean \
-           && rm -rf /var/lib/apt/lists/*
-          DOCKERFILE
-          docker build -f /tmp/kernel-build.Dockerfile \
-            --build-arg BASE_IMAGE="${KIMAGE}" \
-            -t "${KIMAGE}-hostelf" .
-
           if [ ! -f "${KERNEL_DIR}/source.tar.xz" ]; then
             curl -SsL -o "${KERNEL_DIR}/source.tar.xz" "${KSOURCE}"
           fi
 
-          docker run \
-            --cpus "${KBUILD_CPUS}" \
-            --rm \
-            --memory "${KBUILD_MEMORY}" \
-            -v "$(pwd)/${KERNEL_DIR}":/kernel \
-            --workdir /kernel \
-            "${KIMAGE}-hostelf" \
-            /bin/bash -c "./build.sh"
+          BUILD_DIR="/tmp/kbuild"
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${BUILD_DIR}"
+          tar -xf "${KERNEL_DIR}/source.tar.xz" -C "${BUILD_DIR}" --strip-components=1
+          cp "${KERNEL_DIR}/config-arm64" "${BUILD_DIR}/.config"
+
+          make -C "${BUILD_DIR}" olddefconfig
+          make -C "${BUILD_DIR}" -j"${KBUILD_CPUS}"
+
+          cp "${BUILD_DIR}/vmlinux" "${KERNEL_DIR}/vmlinux"
 
       - name: Package
         if: steps.release_check.outputs.skip != 'true'

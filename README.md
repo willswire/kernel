@@ -15,7 +15,7 @@ git submodule update --init --recursive
 
 ## GitHub Actions
 
-The workflows use GitHub-hosted Ubuntu runners and rely on Docker to build the kernel in the same containerized toolchain as upstream.
+The workflows use GitHub-hosted Ubuntu 22.04 ARM runners and build the kernel directly on the runner (no containerized build).
 
 ## Release flow
 
