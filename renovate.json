@@ -1,0 +1,7 @@
+{
+  "extends": ["config:base"],
+  "enabledManagers": ["git-submodules"],
+  "git-submodules": {
+    "enabled": true
+  }
+}

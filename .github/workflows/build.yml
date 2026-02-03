@@ -1,0 +1,32 @@
+name: Build Kernel
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build kernel
+        run: ./scripts/build-kernel.sh
+
+      - name: Package
+        run: ./scripts/package.sh "${{ github.sha }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: containerization-kernel-${{ github.sha }}
+          path: out/*.tar.gz

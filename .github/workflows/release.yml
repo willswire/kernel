@@ -1,0 +1,60 @@
+name: Release Kernel
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Resolve submodule SHA
+        id: upstream
+        run: |
+          set -euo pipefail
+          SHA="$(git -C containerization rev-parse HEAD)"
+          if [ -z "${SHA}" ]; then
+            echo "Failed to resolve submodule SHA" >&2
+            exit 1
+          fi
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=containerization-${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already released
+        id: release_check
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.upstream.outputs.tag }}"
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "Release ${TAG} already exists. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build kernel
+        if: steps.release_check.outputs.skip != 'true'
+        run: ./scripts/build-kernel.sh
+
+      - name: Package
+        if: steps.release_check.outputs.skip != 'true'
+        run: ./scripts/package.sh "${{ steps.upstream.outputs.sha }}"
+
+      - name: Release
+        if: steps.release_check.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.upstream.outputs.tag }}
+          name: Apple containerization kernel ${{ steps.upstream.outputs.sha }}
+          files: out/*.tar.gz
