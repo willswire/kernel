@@ -57,7 +57,8 @@ jobs:
             libncurses-dev \
             libssl-dev \
             make \
-            xz-utils
+            xz-utils \
+            zstd
 
       - name: Build kernel
         if: steps.release_check.outputs.skip != 'true'
@@ -83,7 +84,7 @@ jobs:
           make -C "${BUILD_DIR}" olddefconfig
           make -C "${BUILD_DIR}" -j"${KBUILD_CPUS}"
 
-          cp "${BUILD_DIR}/vmlinux" "${KERNEL_DIR}/vmlinux"
+          cp "${BUILD_DIR}/arch/arm64/boot/Image" "${KERNEL_DIR}/vmlinux"
 
       - name: Package
         if: steps.release_check.outputs.skip != 'true'
@@ -92,7 +93,7 @@ jobs:
           DIST_DIR="dist"
           OUT_DIR="out"
           VERSION="${{ steps.upstream.outputs.sha }}"
-          ARCHIVE_BASENAME="containerization-kernel-${VERSION}"
+          ARCHIVE_BASENAME="kernel-${VERSION}"
 
           mkdir -p "${DIST_DIR}" "${OUT_DIR}"
           cp "containerization/kernel/vmlinux" "${DIST_DIR}/vmlinux"
@@ -107,12 +108,12 @@ jobs:
           if [ -f "${DIST_DIR}/config-arm64" ]; then
             FILES+=(config-arm64)
           fi
-          tar -C "${DIST_DIR}" -czf "${OUT_DIR}/${ARCHIVE_BASENAME}.tar.gz" "${FILES[@]}"
+          tar -C "${DIST_DIR}" --zstd -cf "${OUT_DIR}/${ARCHIVE_BASENAME}.tar.zst" "${FILES[@]}"
 
       - name: Release
         if: steps.release_check.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.upstream.outputs.tag }}
-          name: Apple containerization kernel ${{ steps.upstream.outputs.sha }}
-          files: out/*.tar.gz
+          name: ${{ steps.upstream.outputs.sha }}
+          files: out/*.tar.zst
