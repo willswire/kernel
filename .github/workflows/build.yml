@@ -54,7 +54,7 @@ jobs:
           make -C "${BUILD_DIR}" olddefconfig
           make -C "${BUILD_DIR}" -j"${KBUILD_CPUS}"
 
-          cp "${BUILD_DIR}/vmlinux" "${KERNEL_DIR}/vmlinux"
+          cp "${BUILD_DIR}/arch/arm64/boot/Image" "${KERNEL_DIR}/vmlinux"
 
       - name: Package
         run: |
