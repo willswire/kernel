@@ -4,16 +4,14 @@ This repository packages and releases the optimized Linux kernel from Apple's co
 
 ## Quick start
 
-1. Ensure Docker is available (GitHub-hosted Ubuntu runners work out of the box). On macOS, the script will use the Apple `container` tool if present.
-2. Initialize the submodule.
-3. Run the build.
+This repository builds in GitHub Actions only. Local build scripts have been removed.
+
+1. Ensure the `containerization` submodule is initialized.
+2. Push a branch or open a PR to trigger the build workflow.
 
 ```bash
 git submodule update --init --recursive
-./scripts/build-kernel.sh
 ```
-
-Build output is staged in `dist/`.
 
 ## GitHub Actions
 

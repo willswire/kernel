@@ -3,7 +3,7 @@ name: Build Kernel
 on:
   pull_request:
   push:
-    branches:
+    branches-ignore:
       - main
 
 permissions:
@@ -20,10 +20,80 @@ jobs:
           fetch-depth: 0
 
       - name: Build kernel
-        run: ./scripts/build-kernel.sh
+        run: |
+          set -euo pipefail
+          KERNEL_DIR="containerization/kernel"
+          KSOURCE=$(awk -F '\?=' '/^KSOURCE/ {print $2}' "${KERNEL_DIR}/Makefile" | xargs)
+          KIMAGE=$(awk -F '\?=' '/^KIMAGE/ {print $2}' "${KERNEL_DIR}/Makefile" | xargs)
+
+          HOST_CPUS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc || echo 2)
+          DEFAULT_CPUS=$(( HOST_CPUS < 8 ? HOST_CPUS : 8 ))
+          KBUILD_CPUS="${KBUILD_CPUS:-${DEFAULT_CPUS}}"
+
+          HOST_MEM_KB=$(awk "/^MemTotal:/ {print \$2}" /proc/meminfo 2>/dev/null || echo 0)
+          HOST_MEM_GB=$(( HOST_MEM_KB / 1024 / 1024 ))
+          if [ "${HOST_MEM_GB}" -le 0 ]; then
+            HOST_MEM_GB=8
+          fi
+          DEFAULT_MEM_GB=$(( HOST_MEM_GB * 80 / 100 ))
+          if [ "${DEFAULT_MEM_GB}" -lt 2 ]; then
+            DEFAULT_MEM_GB=2
+          fi
+          if [ "${DEFAULT_MEM_GB}" -gt 16 ]; then
+            DEFAULT_MEM_GB=16
+          fi
+          KBUILD_MEMORY="${KBUILD_MEMORY:-${DEFAULT_MEM_GB}g}"
+
+          docker build "${KERNEL_DIR}/image" -f "${KERNEL_DIR}/image/Dockerfile" -t "${KIMAGE}"
+
+          cat > /tmp/kernel-build.Dockerfile <<'DOCKERFILE'
+          ARG BASE_IMAGE=kernel-build:0.1
+          FROM ${BASE_IMAGE}
+
+          RUN apt-get update \
+           && apt-get install -y libelf-dev \
+           && apt-get clean \
+           && rm -rf /var/lib/apt/lists/*
+          DOCKERFILE
+          docker build -f /tmp/kernel-build.Dockerfile \
+            --build-arg BASE_IMAGE="${KIMAGE}" \
+            -t "${KIMAGE}-hostelf" .
+
+          if [ ! -f "${KERNEL_DIR}/source.tar.xz" ]; then
+            curl -SsL -o "${KERNEL_DIR}/source.tar.xz" "${KSOURCE}"
+          fi
+
+          docker run \
+            --cpus "${KBUILD_CPUS}" \
+            --rm \
+            --memory "${KBUILD_MEMORY}" \
+            -v "$(pwd)/${KERNEL_DIR}":/kernel \
+            --workdir /kernel \
+            "${KIMAGE}-hostelf" \
+            /bin/bash -c "./build.sh"
 
       - name: Package
-        run: ./scripts/package.sh "${{ github.sha }}"
+        run: |
+          set -euo pipefail
+          DIST_DIR="dist"
+          OUT_DIR="out"
+          VERSION="${{ github.sha }}"
+          ARCHIVE_BASENAME="containerization-kernel-${VERSION}"
+
+          mkdir -p "${DIST_DIR}" "${OUT_DIR}"
+          cp "containerization/kernel/vmlinux" "${DIST_DIR}/vmlinux"
+          if [ -f "containerization/kernel/config-arm64" ]; then
+            cp "containerization/kernel/config-arm64" "${DIST_DIR}/config-arm64"
+          fi
+
+          git -C containerization rev-parse HEAD > "${DIST_DIR}/upstream-commit.txt"
+          date -u "+%Y-%m-%dT%H:%M:%SZ" > "${DIST_DIR}/build-timestamp.txt"
+
+          FILES=(vmlinux upstream-commit.txt build-timestamp.txt)
+          if [ -f "${DIST_DIR}/config-arm64" ]; then
+            FILES+=(config-arm64)
+          fi
+          tar -C "${DIST_DIR}" -czf "${OUT_DIR}/${ARCHIVE_BASENAME}.tar.gz" "${FILES[@]}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
