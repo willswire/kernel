@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,13 +43,71 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install build dependencies
+        if: steps.release_check.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            flex \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            make \
+            xz-utils
+
       - name: Build kernel
         if: steps.release_check.outputs.skip != 'true'
-        run: ./scripts/build-kernel.sh
+        run: |
+          set -euo pipefail
+          KERNEL_DIR="containerization/kernel"
+          KSOURCE=$(awk -F '\?=' '/^KSOURCE/ {print $2}' "${KERNEL_DIR}/Makefile" | xargs)
+
+          HOST_CPUS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc || echo 2)
+          DEFAULT_CPUS=$(( HOST_CPUS < 8 ? HOST_CPUS : 8 ))
+          KBUILD_CPUS="${KBUILD_CPUS:-${DEFAULT_CPUS}}"
+
+          if [ ! -f "${KERNEL_DIR}/source.tar.xz" ]; then
+            curl -SsL -o "${KERNEL_DIR}/source.tar.xz" "${KSOURCE}"
+          fi
+
+          BUILD_DIR="/tmp/kbuild"
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${BUILD_DIR}"
+          tar -xf "${KERNEL_DIR}/source.tar.xz" -C "${BUILD_DIR}" --strip-components=1
+          cp "${KERNEL_DIR}/config-arm64" "${BUILD_DIR}/.config"
+
+          make -C "${BUILD_DIR}" olddefconfig
+          make -C "${BUILD_DIR}" -j"${KBUILD_CPUS}"
+
+          cp "${BUILD_DIR}/vmlinux" "${KERNEL_DIR}/vmlinux"
 
       - name: Package
         if: steps.release_check.outputs.skip != 'true'
-        run: ./scripts/package.sh "${{ steps.upstream.outputs.sha }}"
+        run: |
+          set -euo pipefail
+          DIST_DIR="dist"
+          OUT_DIR="out"
+          VERSION="${{ steps.upstream.outputs.sha }}"
+          ARCHIVE_BASENAME="containerization-kernel-${VERSION}"
+
+          mkdir -p "${DIST_DIR}" "${OUT_DIR}"
+          cp "containerization/kernel/vmlinux" "${DIST_DIR}/vmlinux"
+          if [ -f "containerization/kernel/config-arm64" ]; then
+            cp "containerization/kernel/config-arm64" "${DIST_DIR}/config-arm64"
+          fi
+
+          git -C containerization rev-parse HEAD > "${DIST_DIR}/upstream-commit.txt"
+          date -u "+%Y-%m-%dT%H:%M:%SZ" > "${DIST_DIR}/build-timestamp.txt"
+
+          FILES=(vmlinux upstream-commit.txt build-timestamp.txt)
+          if [ -f "${DIST_DIR}/config-arm64" ]; then
+            FILES+=(config-arm64)
+          fi
+          tar -C "${DIST_DIR}" -czf "${OUT_DIR}/${ARCHIVE_BASENAME}.tar.gz" "${FILES[@]}"
 
       - name: Release
         if: steps.release_check.outputs.skip != 'true'
