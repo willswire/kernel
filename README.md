@@ -4,10 +4,10 @@ This repository packages and releases the optimized Linux kernel from Apple's co
 
 ## Quick start
 
-This repository builds in GitHub Actions only. Local build scripts have been removed.
+Builds run in GitHub Actions only; local build scripts have been removed.
 
-1. Ensure the `containerization` submodule is initialized.
-2. Push a branch or open a PR to trigger the build workflow.
+1. Initialize the `containerization` submodule.
+2. Push a branch or open a PR to trigger the workflow.
 
 ```bash
 git submodule update --init --recursive
@@ -15,7 +15,7 @@ git submodule update --init --recursive
 
 ## GitHub Actions
 
-The workflows use GitHub-hosted Ubuntu 22.04 ARM runners and build the kernel directly on the runner (no containerized build).
+Workflows use GitHub-hosted Ubuntu 22.04 ARM runners and build the kernel directly on the runner (no containerized build).
 
 ## Release flow
 
